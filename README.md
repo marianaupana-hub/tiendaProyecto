@@ -21,6 +21,16 @@ flutter devices
 flutter run -d ID_DEL_DISPOSITIVO
 ```
 
+Las compilaciones y cachés de Flutter/Android se regeneran al ejecutar el
+proyecto y pueden ocupar bastante espacio. Para borrarlas de nuevo sin eliminar
+el código, ejecuta:
+
+```powershell
+flutter clean
+```
+
+Después, `flutter pub get` restaura las dependencias para volver a ejecutar.
+
 Acceso local de demostración:
 
 - Teléfono: `+50255550123`
@@ -45,10 +55,11 @@ Firebase propia; no compartas aquí claves, archivos de credenciales ni tokens.
 4. Copia los valores públicos de configuración del proyecto y las reglas de
    [firestore.rules](./firestore.rules) en la sección **Firestore Database >
    Rules** de Firebase Console y publícalas.
-5. Inicia primero la app Android con Firebase configurado y entra con Google.
-   En Firebase Authentication, copia el UID de esa cuenta; en Firestore crea un
-   documento vacío con ese UID en la colección `admins`. Cierra sesión y vuelve
-   a entrar. Solo los UID incluidos en `admins` podrán administrar los datos.
+5. Inicia primero la app con Firebase configurado y entra con Google. En
+   Firebase Authentication, copia el UID de esa cuenta. El UID debe coincidir
+   con el ID del documento autorizado en la
+   colección `staff_users` (por ejemplo, `staff_users/3Tyuk3H8bvaRvNFPuNxO6kZ6FSG2`).
+   Solo esos usuarios podrán administrar los datos.
 6. La app administradora publicará los productos demo si el catálogo remoto
    está vacío. Luego inicia Chrome con la misma configuración; las compras
    anónimas descuentan existencias en Firestore y aparecen en los pedidos y
@@ -80,7 +91,7 @@ Al ejecutar en Android, añade:
 `FIREBASE_AUTH_DOMAIN` es opcional. Los valores `FIREBASE_*` son configuración
 pública del cliente, no sustituyen reglas de Firestore. No agregues credenciales
 privadas de AWS o Google al código ni al APK. La sesión de compra web es
-anónima; las administradoras se autorizan mediante `admins/{uid}`.
+anónima; las administradoras se autorizan mediante `staff_users/{uid}`.
 
 ## Límites importantes
 
@@ -108,3 +119,59 @@ anónima; las administradoras se autorizan mediante `admins/{uid}`.
   basado en el catálogo.
 - Sincronización Firestore en tiempo real cuando ambas plataformas usan el
   mismo proyecto Firebase.
+
+## Vincular tu cuenta de Google (gratis)
+
+Con Firebase configurado (plan Spark), la app administradora muestra el botón
+**Continuar con Google**. Una vez vinculada la cuenta:
+
+- El icono de escudo de la barra superior muestra la cuenta vinculada y
+  permite desvincularla.
+- **Notificaciones** muestra en tiempo real los productos nuevos, eliminados o
+  con existencias distintas (por otro dispositivo o por una compra), además de
+  las compras nuevas.
+
+Para no escribir las claves en cada comando, copia
+`firebase_config.example.json` a `firebase_config.json` (ya está en
+`.gitignore`), rellénalo y ejecuta:
+
+```powershell
+flutter run --dart-define-from-file=firebase_config.json
+```
+
+## Publicar en GitHub Pages
+
+El repositorio incluye un workflow que compila y publica la web en cada push a
+`main`. En GitHub, habilita **Settings > Pages > Build and deployment > Source:
+GitHub Actions**. Agrega estas variables en **Settings > Secrets and variables >
+Actions > Variables** para conectar el proyecto Firebase:
+
+- `FIREBASE_WEB_API_KEY`
+- `FIREBASE_WEB_APP_ID`
+- `FIREBASE_SENDER_ID`
+
+Son valores de configuración pública de Firebase para la app web. El workflow
+genera la ruta base `/tiendaProyecto/` y una página 404 para que GitHub Pages
+pueda abrir también rutas como `/tiendaProyecto/admin`. En Firebase
+Authentication, agrega `marianaupana-hub.github.io` a los dominios autorizados.
+
+## Panel de administración en iPhone (web instalable, gratis)
+
+El panel de administración también funciona en la web en la ruta `/admin`
+(por ejemplo `https://sevenroses-90262.web.app/admin`). La tienda para clientas
+sigue en la dirección principal.
+
+Publicar en Firebase Hosting (plan Spark):
+
+```powershell
+npm install -g firebase-tools
+firebase login
+flutter build web --release --dart-define-from-file=firebase_config.json
+firebase deploy
+```
+
+`firebase deploy` publica la web y también las reglas de `firestore.rules`.
+
+En el iPhone: abrir la dirección `/admin` en Safari, tocar Compartir y
+**Agregar a pantalla de inicio**. La app pide entrar con Google; la cuenta debe
+estar autorizada en la colección `staff_users` de Firestore.

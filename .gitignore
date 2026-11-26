@@ -46,3 +46,11 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Archivos locales y credenciales
+android/.gradle/
+android/.kotlin/
+android/local.properties
+**/GeneratedPluginRegistrant.*
+firebase_config.json
+/.firebase/

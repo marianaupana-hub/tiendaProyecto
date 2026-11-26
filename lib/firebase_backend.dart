@@ -8,7 +8,10 @@ class FirebaseBackend {
   FirebaseBackend._();
   static bool _googleInitialized = false;
 
-  static const _apiKey = String.fromEnvironment('FIREBASE_API_KEY');
+  static const _defaultApiKey = String.fromEnvironment('FIREBASE_API_KEY');
+  static const _webApiKey = String.fromEnvironment('FIREBASE_WEB_API_KEY');
+  static const _androidApiKey =
+      String.fromEnvironment('FIREBASE_ANDROID_API_KEY');
   static const _defaultAppId = String.fromEnvironment('FIREBASE_APP_ID');
   static const _webAppId = String.fromEnvironment('FIREBASE_WEB_APP_ID');
   static const _androidAppId =
@@ -25,18 +28,36 @@ class FirebaseBackend {
       _appId.isNotEmpty &&
       _projectId.isNotEmpty &&
       _senderId.isNotEmpty;
+  static String get _apiKey {
+    final platformKey = kIsWeb
+        ? _webApiKey
+        : (defaultTargetPlatform == TargetPlatform.android
+            ? _androidApiKey
+            : '');
+    return platformKey.isNotEmpty ? platformKey : _defaultApiKey;
+  }
+
   static String get _appId {
-    final platformAppId = switch (defaultTargetPlatform) {
-      TargetPlatform.android => _androidAppId,
-      TargetPlatform.iOS => _iosAppId,
-      _ => _webAppId,
-    };
+    final platformAppId = kIsWeb
+        ? _webAppId
+        : switch (defaultTargetPlatform) {
+            TargetPlatform.android => _androidAppId,
+            TargetPlatform.iOS => _iosAppId,
+            _ => _webAppId,
+          };
     return platformAppId.isNotEmpty ? platformAppId : _defaultAppId;
   }
 
   static bool get available => Firebase.apps.isNotEmpty;
   static FirebaseFirestore get database => FirebaseFirestore.instance;
   static FirebaseAuth get auth => FirebaseAuth.instance;
+
+  /// Cuenta de Google vinculada (null si no hay sesión o es anónima).
+  static User? get googleUser {
+    if (!available) return null;
+    final user = auth.currentUser;
+    return user == null || user.isAnonymous ? null : user;
+  }
 
   static Future<void> initialize() async {
     if (!configured) return;
@@ -56,36 +77,55 @@ class FirebaseBackend {
       throw StateError('Configura primero el proyecto Firebase.');
     }
 
-    final google = GoogleSignIn.instance;
-    if (!_googleInitialized) {
-      await google.initialize(
-        serverClientId:
-            googleServerClientId.isEmpty ? null : googleServerClientId,
-      );
-      _googleInitialized = true;
-    }
-    final account = await google.authenticate();
-    final idToken = account.authentication.idToken;
-    if (idToken == null) {
-      throw StateError('Google no devolvió un token de autenticación.');
-    }
+    User? user;
+    if (kIsWeb) {
+      final provider = GoogleAuthProvider()
+        ..setCustomParameters({'prompt': 'select_account'});
+      final result = await auth.signInWithPopup(provider);
+      user = result.user;
+    } else {
+      final google = GoogleSignIn.instance;
+      if (!_googleInitialized) {
+        await google.initialize(
+          serverClientId:
+              googleServerClientId.isEmpty ? null : googleServerClientId,
+        );
+        _googleInitialized = true;
+      }
+      final account = await google.authenticate();
+      final idToken = account.authentication.idToken;
+      if (idToken == null) {
+        throw StateError('Google no devolvió un token de autenticación.');
+      }
 
-    final credential = GoogleAuthProvider.credential(idToken: idToken);
-    final result = await auth.signInWithCredential(credential);
-    final user = result.user;
+      final credential = GoogleAuthProvider.credential(idToken: idToken);
+      final result = await auth.signInWithCredential(credential);
+      user = result.user;
+    }
     if (user == null) throw StateError('Firebase no devolvió una cuenta.');
 
-    final admin = await database.collection('admins').doc(user.uid).get();
-    if (!admin.exists) {
+    if (!await _isStaff(user)) {
       await auth.signOut();
-      await google.signOut();
+      if (!kIsWeb) await GoogleSignIn.instance.signOut();
       throw StateError(
         'Esta cuenta Google no está autorizada como administradora. '
-        'Agrega su UID a la colección admins de Firebase.',
+        'Agrega su UID a la colección staff_users de Firebase.',
       );
     }
     return user;
   }
+
+  /// Recupera la sesión de administradora guardada (por ejemplo al reabrir la
+  /// app web instalada en el iPhone). Devuelve null si no hay sesión válida.
+  static Future<User?> restoreAdmin() async {
+    if (!available) return null;
+    final user = await auth.authStateChanges().first;
+    if (user == null || user.isAnonymous) return null;
+    return await _isStaff(user) ? user : null;
+  }
+
+  static Future<bool> _isStaff(User user) async =>
+      (await database.collection('staff_users').doc(user.uid).get()).exists;
 
   static Stream<List<Map<String, dynamic>>> watchProducts() => database
       .collection('products')
@@ -100,6 +140,21 @@ class FirebaseBackend {
       .snapshots()
       .map((snapshot) => snapshot.docs
           .map((document) => {'id': document.id, ...document.data()})
+          .toList());
+
+  /// Cambios remotos de productos (otros dispositivos o compras de clientas).
+  /// Omite la carga inicial y las escrituras hechas desde este mismo equipo.
+  static Stream<List<Map<String, dynamic>>> watchProductChanges() => database
+      .collection('products')
+      .snapshots()
+      .skip(1)
+      .map((snapshot) => snapshot.docChanges
+          .where((change) => !change.doc.metadata.hasPendingWrites)
+          .map((change) => <String, dynamic>{
+                ...?change.doc.data(),
+                'type': change.type.name,
+                'id': change.doc.id,
+              })
           .toList());
 
   static Future<void> saveProduct(

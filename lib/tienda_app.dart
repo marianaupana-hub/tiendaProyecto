@@ -212,24 +212,54 @@ class _TiendaAppState extends State<TiendaApp> {
   int _saleSequence = 0;
   StreamSubscription<List<Map<String, dynamic>>>? _productsSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _ordersSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _changesSubscription;
   bool _cloudConnected = false;
   bool _cloudProductsAvailable = false;
   bool _cloudAdmin = false;
   bool _seededCloudProducts = false;
   bool _receivedInitialOrders = false;
 
+  /// En la web, la ruta /admin (o ?admin) abre el panel de administración.
+  static final bool _webAdminMode = kIsWeb &&
+      (Uri.base.pathSegments.contains('admin') ||
+          Uri.base.queryParameters.containsKey('admin'));
+
   @override
   void initState() {
     super.initState();
     if (kIsWeb && FirebaseBackend.available) {
       _listenForCloudProducts();
+      if (_webAdminMode) _restoreAdminSession();
     }
+  }
+
+  Future<void> _restoreAdminSession() async {
+    try {
+      final user = await FirebaseBackend.restoreAdmin();
+      if (!mounted || user == null) return;
+      _startCloudAdmin();
+    } catch (_) {
+      // Sin sesión válida: se muestra la pantalla de acceso.
+    }
+  }
+
+  void _startCloudAdmin() {
+    setState(() {
+      _isAdmin = true;
+      _cloudAdmin = true;
+      _section = _Section.dashboard;
+    });
+    _receivedInitialOrders = false;
+    _listenForCloudProducts();
+    _listenForCloudOrders();
+    _listenForProductChanges();
   }
 
   @override
   void dispose() {
     _productsSubscription?.cancel();
     _ordersSubscription?.cancel();
+    _changesSubscription?.cancel();
     super.dispose();
   }
 
@@ -367,18 +397,44 @@ class _TiendaAppState extends State<TiendaApp> {
     );
   }
 
+  void _listenForProductChanges() {
+    _changesSubscription?.cancel();
+    _changesSubscription = FirebaseBackend.watchProductChanges().listen(
+      (changes) {
+        if (!mounted || changes.isEmpty) return;
+        final messages = <String>[];
+        for (final change in changes) {
+          final type = change['type'] as String?;
+          final name = change['name'] as String? ?? 'Producto';
+          final stock = (change['stock'] as num?)?.toInt();
+          messages.add(switch (type) {
+            'added' => 'Nuevo producto en el catálogo: $name',
+            'removed' => 'Producto eliminado: $name',
+            _ => stock == null
+                ? '$name se actualizó'
+                : '$name · existencias: $stock',
+          });
+        }
+        setState(() {
+          for (final message in messages.reversed) {
+            _events.insert(0, StoreEvent(message, DateTime.now()));
+          }
+        });
+        _notify(messages.length == 1
+            ? messages.first
+            : '${messages.length} cambios en productos');
+      },
+      onError: (Object error) {
+        if (mounted) _notify('Error al recibir cambios: $error');
+      },
+    );
+  }
+
   Future<void> _signInGoogleAdmin() async {
     try {
       final user = await FirebaseBackend.signInAdminWithGoogle();
       if (!mounted || user == null) return;
-      setState(() {
-        _isAdmin = true;
-        _cloudAdmin = true;
-        _section = _Section.dashboard;
-      });
-      _receivedInitialOrders = false;
-      _listenForCloudProducts();
-      _listenForCloudOrders();
+      _startCloudAdmin();
       _notify('Sesión de administradora conectada. Sincronización activa.');
     } catch (error) {
       if (mounted) _notify('$error');
@@ -398,6 +454,7 @@ class _TiendaAppState extends State<TiendaApp> {
     if (_cloudAdmin) {
       await _productsSubscription?.cancel();
       await _ordersSubscription?.cancel();
+      await _changesSubscription?.cancel();
       await FirebaseBackend.signOut();
     }
     if (mounted) {
@@ -567,7 +624,8 @@ class _TiendaAppState extends State<TiendaApp> {
 
   @override
   Widget build(BuildContext context) {
-    final showStorefront = kIsWeb || widget.previewStorefront;
+    final showStorefront =
+        (kIsWeb && !_webAdminMode) || widget.previewStorefront;
     return MaterialApp(
       navigatorKey: _navigatorKey,
       scaffoldMessengerKey: _messengerKey,
@@ -694,6 +752,7 @@ class _AdminLoginScreenState extends State<_AdminLoginScreen> {
                         textAlign: TextAlign.center,
                         style: TextStyle(color: _muted)),
                     const SizedBox(height: 28),
+                    if (!widget.googleAvailable) ...[
                     TextField(
                       controller: _phone,
                       keyboardType: TextInputType.phone,
@@ -728,14 +787,16 @@ class _AdminLoginScreenState extends State<_AdminLoginScreen> {
                         child: Text('Iniciar sesión'),
                       ),
                     ),
+                    ],
                     if (widget.googleAvailable) ...[
                       const SizedBox(height: 10),
-                      OutlinedButton.icon(
+                      FilledButton.icon(
                         onPressed: widget.onGoogleLogin,
                         icon: const Icon(Icons.login),
                         label: const Text('Continuar con Google'),
                       ),
                     ],
+                    if (!widget.googleAvailable) ...[
                     const SizedBox(height: 14),
                     const Text(
                       'Usuario de prueba sin AWS: +50255550123\\nContraseña: SevenRoses2026!',
@@ -748,6 +809,7 @@ class _AdminLoginScreenState extends State<_AdminLoginScreen> {
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 11, color: _muted),
                     ),
+                    ],
                   ],
                 ),
               ),
@@ -1703,6 +1765,15 @@ class _AdminTopbar extends StatelessWidget {
             const Text('Viernes, 6 de noviembre',
                 style: TextStyle(color: _muted, fontSize: 12)),
           const SizedBox(width: 12),
+          if (FirebaseBackend.googleUser != null)
+            IconButton(
+              tooltip: 'Cuenta de Google',
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => _GoogleAccountDialog(onExit: onExit),
+              ),
+              icon: const Icon(Icons.verified_user_outlined),
+            ),
           IconButton(
             tooltip: 'Notificaciones',
             onPressed: () => showDialog<void>(
@@ -1747,6 +1818,68 @@ class _AdminTopbar extends StatelessWidget {
   }
 }
 
+class _GoogleAccountDialog extends StatelessWidget {
+  const _GoogleAccountDialog({required this.onExit});
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseBackend.googleUser;
+    final photo = user?.photoURL;
+    return AlertDialog(
+      title: const Text('Cuenta de Google vinculada'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(
+                backgroundColor: const Color(0xFFF1E4DB),
+                backgroundImage: photo == null ? null : NetworkImage(photo),
+                child: photo == null
+                    ? const Icon(Icons.person_outline, color: _accent)
+                    : null,
+              ),
+              title: Text(user?.displayName ?? 'Administradora'),
+              subtitle: Text(user?.email ?? ''),
+            ),
+            const SizedBox(height: 8),
+            const Row(
+              children: [
+                Icon(Icons.cloud_done_outlined,
+                    size: 18, color: Color(0xFF628C73)),
+                SizedBox(width: 8),
+                Expanded(child: Text('Sincronización en tiempo real activa')),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Los cambios en productos, existencias y compras aparecen al instante en Notificaciones.',
+              style: TextStyle(fontSize: 12, color: _muted),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.pop(context);
+            onExit();
+          },
+          child: const Text('Desvincular y salir'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cerrar'),
+        ),
+      ],
+    );
+  }
+}
+
 class _NotificationsDialog extends StatelessWidget {
   const _NotificationsDialog({required this.events});
   final List<StoreEvent> events;
@@ -1758,7 +1891,7 @@ class _NotificationsDialog extends StatelessWidget {
           width: 420,
           child: events.isEmpty
               ? const Text(
-                  'Aún no hay eventos recibidos. Las compras y los cambios aparecerán aquí al conectarse el backend AWS.',
+                  'Aún no hay eventos recibidos. Las compras y los cambios de productos aparecerán aquí en tiempo real al iniciar sesión con Google.',
                 )
               : ListView(
                   shrinkWrap: true,

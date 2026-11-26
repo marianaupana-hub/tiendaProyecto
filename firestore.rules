@@ -7,7 +7,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return signedIn() &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+        exists(/databases/$(database)/documents/staff_users/$(request.auth.uid));
     }
 
     function validOrder(orderId) {
@@ -35,7 +35,7 @@ service cloud.firestore {
         data.stockChanges.size() > 0;
     }
 
-    match /admins/{uid} {
+    match /staff_users/{uid} {
       allow get: if signedIn() && request.auth.uid == uid;
       allow list, create, update, delete: if false;
     }
