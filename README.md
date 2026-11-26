@@ -141,10 +141,11 @@ flutter run --dart-define-from-file=firebase_config.json
 
 ## Publicar en GitHub Pages
 
-El repositorio incluye un workflow que compila y publica la web en cada push a
-`main`. En GitHub, habilita **Settings > Pages > Build and deployment > Source:
-GitHub Actions**. Agrega estas variables en **Settings > Secrets and variables >
-Actions > Variables** para conectar el proyecto Firebase:
+El repositorio incluye un workflow que habilita Pages y compila la web en cada
+push a `main`. Si Pages no se habilita automáticamente, selecciona
+**Settings > Pages > Build and deployment > Source: GitHub Actions**. Agrega
+estas variables en **Settings > Secrets and variables > Actions > Variables**
+para conectar el proyecto Firebase:
 
 - `FIREBASE_WEB_API_KEY`
 - `FIREBASE_WEB_APP_ID`
