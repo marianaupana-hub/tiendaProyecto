@@ -142,19 +142,13 @@ flutter run --dart-define-from-file=firebase_config.json
 ## Publicar en GitHub Pages
 
 El repositorio incluye un workflow que habilita Pages y compila la web en cada
-push a `main`. Si Pages no se habilita automáticamente, selecciona
-**Settings > Pages > Build and deployment > Source: GitHub Actions**. Agrega
-estas variables en **Settings > Secrets and variables > Actions > Variables**
-para conectar el proyecto Firebase:
-
-- `FIREBASE_WEB_API_KEY`
-- `FIREBASE_WEB_APP_ID`
-- `FIREBASE_SENDER_ID`
-
-Son valores de configuración pública de Firebase para la app web. El workflow
-genera la ruta base `/tiendaProyecto/` y una página 404 para que GitHub Pages
-pueda abrir también rutas como `/tiendaProyecto/admin`. En Firebase
-Authentication, agrega `marianaupana-hub.github.io` a los dominios autorizados.
+push a `main`, usando la configuración pública de la app Firebase web definida
+en `.github/workflows/deploy-pages.yml`. Si Pages no se habilita
+automáticamente, selecciona **Settings > Pages > Build and deployment >
+Source: GitHub Actions**. El workflow genera la ruta base `/tiendaProyecto/` y
+una página 404 para que GitHub Pages pueda abrir también rutas como
+`/tiendaProyecto/admin`. En Firebase Authentication, agrega
+`marianaupana-hub.github.io` a los dominios autorizados.
 
 ## Panel de administración en iPhone (web instalable, gratis)
 
